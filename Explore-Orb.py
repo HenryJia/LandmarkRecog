@@ -36,7 +36,7 @@ pool = ThreadPool(20)
 train_imgs = [imgs for imgs in tqdm(pool.imap_unordered(sample, range(max_samples)), total = max_samples)]
 
 # Initiate ORB detector
-orb = cv2.ORB_create()
+orb = cv2.ORB_create(nfeatures = 100)
 
 # find the keypoints and descriptors with ORB
 # kp, des = orb.detectAndCompute(img,None)
@@ -52,57 +52,75 @@ max_vis = 100
 
 # features = [orb.detectAndCompute(img, None) for img in train_imgs]
 
-FLANN_INDEX_LSH = 6
-index_params= dict(algorithm = FLANN_INDEX_LSH,
-                   table_number = 6, # 12
-                   key_size = 12,     # 20
-                   multi_probe_level = 1) #2
-search_params = dict(checks=50)   # or pass empty dictionary
+#FLANN_INDEX_LSH = 6
+#index_params= dict(algorithm = FLANN_INDEX_LSH,
+                   #table_number = 6, # 12
+                   #key_size = 12,     # 20
+                   #multi_probe_level = 1) #2
+#search_params = dict(checks=50)   # or pass empty dictionary
 
-flann = cv2.FlannBasedMatcher(index_params, search_params)
-
-permutation = np.zeros(max_vis, dtype = np.int32)
-score = np.zeros(max_vis, dtype = np.float32)
-for i, (kp1, ds1) in tqdm(enumerate(features[:max_vis]), total = max_vis):
-    for j, (kp2, ds2) in enumerate(features):
-        if j == i:
-            continue # Skip if we're comparing the same image
-        # Match every image in the trainset with every other image in the trainset
-        try:
-            m = flann.knnMatch(ds1, ds2, k = 2)
-        except:
-            continue
-        # Select the good matches and use them to calculate a score for the overall match of an image
-        score_img = 0
-        for k in range(len(m)):
-            if len(m[k]) != 2:
-                continue
-            if m[k][0].distance < 0.7 * m[k][1].distance:
-                # score is the sum of reciprocal of distances of all matched points
-                score_img += 1.0 / (m[k][0].distance + 1e-7)
-
-        if score_img > score[i] and score_img > 0.5:
-            score[i] = score_img
-            permutation[i] = j
-
-print(permutation)
-print(score)
+#flann = cv2.FlannBasedMatcher(index_params, search_params)
+bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck = True)
 
 if os.path.exists('./vis'):
     shutil.rmtree('./vis')
 os.makedirs('./vis')
 
-i = 0
-while (i < max_vis):
-    if (score[i] == 0):
-        i += 1
-        continue
-    plt.figure(figsize = (10, 5))
-    plt.subplot(1, 2, 1)
+permutation = np.zeros(max_vis, dtype = np.int32)
+score = np.zeros(max_vis, dtype = np.float32)
+for i, (kp1, ds1) in tqdm(enumerate(features[:max_vis]), total = max_vis):
+    best_match = None
+
+    for j, (kp2, ds2) in enumerate(features):
+        if j == i:
+            continue # Skip if we're comparing the same image
+        # Match every image in the trainset with every other image in the trainset
+        try:
+            #matches = flann.knnMatch(ds1, ds2, k = 2)
+            matches = bf.match(ds1, ds2)
+        except:
+            continue
+        matches = sorted(matches, key = lambda x:x.distance)
+        # Select the good matches and use them to calculate a score for the overall match of an image
+        score_img = 0
+        for k in range(min(len(matches), 50)):
+            #if len(matches[k]) != 2:
+                #continue
+            #if matches[k][0].distance < 0.7 * matches[k][1].distance:
+                # score is the sum of reciprocal of distances of all matched points
+                #score_img += 1.0 / (matches[k][0].distance + 1e-7)
+            score_img += 1.0 / (matches[k].distance + 1e-7)
+
+        if score_img > score[i]:
+            best_match = matches
+            score[i] = score_img
+            permutation[i] = j
+
+    plt.figure()
+    img_show = None
+    img_show = cv2.drawMatches(train_imgs[i], kp1, train_imgs[permutation[i]], features[permutation[i]][0], best_match[:10], img_show, flags = 2)
+    plt.imshow(img_show)
     plt.title(score[i])
-    plt.imshow(train_imgs[i])
-    plt.subplot(1, 2, 2)
-    plt.imshow(train_imgs[int(permutation[i])])
-    print(i)
     plt.savefig('./vis/' + str(i) + '.png', bbox_inches = 'tight')
-    i += 1
+
+print(permutation)
+print(score)
+
+#if os.path.exists('./vis'):
+    #shutil.rmtree('./vis')
+#os.makedirs('./vis')
+
+#i = 0
+#while (i < max_vis):
+    #if (score[i] == 0):
+        #i += 1
+        #continue
+    #plt.figure(figsize = (10, 5))
+    #plt.subplot(1, 2, 1)
+    #plt.title(score[i])
+    #plt.imshow(train_imgs[i])
+    #plt.subplot(1, 2, 2)
+    #plt.imshow(train_imgs[int(permutation[i])])
+    #print(i)
+    #plt.savefig('./vis/' + str(i) + '.png', bbox_inches = 'tight')
+    #i += 1

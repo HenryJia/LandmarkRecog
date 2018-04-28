@@ -3,6 +3,7 @@ from time import time
 import numpy as np
 from PIL import Image
 from io import BytesIO
+from scipy.misc import imread
 
 #from multiprocessing.pool import ThreadPool
 
@@ -19,6 +20,7 @@ def grab(url):
 
     return np.array(img)
 
+
 def sample(dataframe):
     img = None
     while(img is None):
@@ -28,3 +30,13 @@ def sample(dataframe):
             img = None
 
     return img
+
+
+def read_img(img_id):
+    try: # Try reading the downloaded data first
+        return imread('./test/' + img_id + '.jpg')
+    except: # Otherwise, try grabbing it off the web
+        try:
+            return grab(test_dict[img_id])
+        except: # OK, so the image doesn't exist, just return a None
+            return None
