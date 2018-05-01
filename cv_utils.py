@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import cv2
 
-def save_orb(fn, orb):
+def save_feat(fn, orb):
     kp, desc = orb
 
     index = []
@@ -17,7 +17,7 @@ def save_orb(fn, orb):
     np.save(fn, desc)
 
 
-def load_orb(fn):
+def load_feat(fn):
     with open(fn + '.kp', 'rb') as f:
         index = pickle.load(f)
 

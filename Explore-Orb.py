@@ -18,6 +18,8 @@ train_data = pd.read_csv('/home/data/LandmarkRetrieval/index.csv')
 test_data = pd.read_csv('/home/data/LandmarkRetrieval/test.csv')
 submission = pd.read_csv('/home/data/LandmarkRetrieval/sample_submission.csv')
 
+# 14950 distinct landmarks in recog
+
 print("Training data size",train_data.shape)
 print("test data size",test_data.shape)
 

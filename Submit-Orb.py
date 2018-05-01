@@ -82,7 +82,7 @@ def match(id1):
     result_df = pd.DataFrame(columns = ['id', 'images'])
     result_all = dict()
 
-    sample = test_data.sample(frac = 0.1) # Compare every image with 10% of the dataset and take the 100 best matches
+    sample = test_data.sample(frac = 0.01) # Compare every image with 10% of the dataset and take the 100 best matches
     score = OrderedDict()
 
     try:
@@ -102,7 +102,8 @@ def match(id1):
             matches = bf.match(ds1, ds2)
 
             score_img = 0
-            for k in range(min(len(matches), 50)): # Only use the 50 best matches
+            matches = sorted(matches, key = lambda x:x.distance) # Only use the 50 best matches
+            for k in range(min(len(matches), 50)):
                 score_img += 1.0 / (matches[k].distance + 1e-7)
 
             score[id2] = score_img
@@ -110,8 +111,8 @@ def match(id1):
         except:
             continue
 
-    # Sort the matches and take the 100 best
-    score = OrderedDict(sorted(score.items(),key = lambda t:t[1]))
+    # Sort the matches and take the 100 best, note higher the score is better so we sort in descending order
+    score = OrderedDict(sorted(score.items(), key = lambda t:t[1], reverse = True))
     out_str = ''
     for s in list(score.keys())[:min(100, len(score.keys()))]:
         out_str = out_str + s + ' '
@@ -127,7 +128,6 @@ print(time() - t0)
 futures = [pool.submit(match, k) for k in tqdm(list(test_dict.keys()))]
 print("Waiting for pool to finish")
 for out in tqdm(as_completed(futures), total = len(test_data)):
-    print("checkpoint")
     result = out.result()
     result_df.loc[result[0]] = list(result)
 
