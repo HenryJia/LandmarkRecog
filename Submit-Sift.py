@@ -1,5 +1,6 @@
 import os
 import shutil
+import random
 from time import time
 import pickle
 from collections import OrderedDict
@@ -19,7 +20,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-test_data = pd.read_csv('/home/data/LandmarkRetrieval/test.csv').sample(n = 1000)
+test_data = pd.read_csv('/home/data/LandmarkRetrieval/test.csv')
 result_df = pd.DataFrame(index = test_data['id'].tolist(), columns = ['id', 'images'])
 print(result_df.head())
 print(result_df.shape)
@@ -35,11 +36,11 @@ t0 = time()
 
 FLANN_INDEX_KDTREE = 1
 index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
-search_params = dict(checks=50)   # or pass empty dictionary
+search_params = {} #dict(checks=50)   # or pass empty dictionary
 flann = cv2.FlannBasedMatcher(index_params,search_params)
 
 descriptor = cv2.xfeatures2d.SIFT_create(nfeatures = 100)
-bow_train = cv2.BOWKMeansTrainer(512)
+bow_train = cv2.BOWKMeansTrainer(32)
 bow_extract = cv2.BOWImgDescriptorExtractor(descriptor, flann)
 print("Done - ", time() - t0)
 
@@ -77,17 +78,23 @@ if not os.path.exists('/home/data/LandmarkRetrieval/sift'):
     os.makedirs('/home/data/LandmarkRetrieval/sift')
 
 print("Submitting SIFT jobs to pool")
-futures = [pool.submit(get_descriptor, k) for k in tqdm(list(test_dict.keys()))]
+
+futures = [pool.submit(get_descriptor, k) for k in tqdm(random.choices(list(test_dict.keys()), k = 100))]
 print("Waiting for pool to finish")
-for feat in tqdm(as_completed(futures), total = len(test_data)):
+for feat in tqdm(as_completed(futures), total = len(futures)):
     out = feat.result()
     if out[1] is not None:
         bow_train.add(out[1])
 print("Done")
-
 print("Cluster the features to get our vocabulary")
 t0 = time()
-voc = bow_train.cluster()
+
+fn = './voc.npy'
+if os.path.exists(fn):
+    voc = np.load(fn)
+else:
+    voc = bow_train.cluster()
+    np.save('./voc.npy', voc)
 bow_extract.setVocabulary(voc)
 print("Done - ", time() - t0)
 print("Bag Of Words Vocabulary", np.shape(voc))
@@ -137,8 +144,7 @@ print("Done - ", time() - t0)
 def match(id1):
     result_df = pd.DataFrame(columns = ['id', 'images'])
     result_all = dict()
-    #sample = test_data.sample(frac = 0.01) # Compare every image with 10% of the dataset and take the 100 best matches
-    sample = test_data
+    sample = test_data.sample(frac = 0.1) # Compare every image with 10% of the dataset and take the 100 best matches
     score = OrderedDict()
     try:
         ds1 = features[id1] # If we can't get the features of the image we're looking at, return nothing
@@ -181,8 +187,8 @@ print("Waiting for pool to finish")
 j = 0
 for out in tqdm(as_completed(futures), total = len(test_data)):
     result = out.result()
-    #if result[1] == '':
-        #continue
+    if result[1] == '':
+        result[1] = result[0]
     #matched = result[1].split(' ')
     #plt.figure(figsize = (10, 20))
     #plt.subplot(1, 2, 1)
@@ -193,5 +199,10 @@ for out in tqdm(as_completed(futures), total = len(test_data)):
     result_df.loc[result[0]] = list(result)
     #j += 1
 
-result_df.to_csv('submission.csv')
+for i in range(len(result_df)):
+    test_data_full = pd.read_csv('/home/data/LandmarkRetrieval/test.csv')
+    if result_df.loc[i]:
+        result_df.iloc[i]['id'] = result_df
+
+result_df.to_csv('submission.csv', index=False)
 print("Done")
