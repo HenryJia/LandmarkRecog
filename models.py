@@ -93,7 +93,9 @@ class FinalNetwork(nn.Module):
     def __init__(self, classes):
         super(FinalNetwork, self).__init__()
 
+        self.dropout1 = nn.Dropout(0.1)
         self.fc1 = nn.Linear(512, 512)
+        self.dropout2 = nn.Dropout(0.1)
         self.fc2 = nn.Linear(512, classes)
 
         for m in self.modules():
@@ -102,7 +104,9 @@ class FinalNetwork(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
+        x = self.dropout1(x)
         x = F.elu(self.fc1(x))
+        x = self.dropout2(x)
         return F.log_softmax(self.fc2(x), dim = 1)
 
 
