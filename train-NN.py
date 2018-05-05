@@ -14,7 +14,9 @@ from torchvision.models import ResNet, resnet50
 
 from queue import Queue
 from threading import Thread
+import tqdm
 from tqdm import tqdm
+tqdm.monitor_interval = 0
 
 from data_utils import grab, sample, read_img, CSVDataset
 from models import MainNetwork, FeatureNetwork, FeatureNetwork, FinalNetwork, CombinedNetwork
@@ -39,6 +41,7 @@ test_loader = DataLoader(test_set, batch_size = 16, shuffle = True, num_workers 
 
 # Build our base model with pretrained weights
 net = CombinedNetwork(int(max(np.max(test_data['landmark_id']), np.max(train_data['landmark_id']))) + 1).cuda()
+torch.save(net.state_dict(), 'network.nn')
 
 criterion = nn.NLLLoss().cuda()
 #main_optim, attention_optim = net.get_optims()
@@ -48,6 +51,7 @@ main_optim = Adam(net.parameters(), lr = 3e-4)
 print('Training')
 net.use_attention = True
 for epoch in range(5):
+    net.load_state_dict(torch.load("network.nn"))
 
     print('Epoch ', epoch + 1, ', beginning train')
     pb = tqdm(total = len(train_set))

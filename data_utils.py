@@ -52,15 +52,19 @@ def random_crop(img, size):
     return img[idx:idx + size[0], idy:idy + size[1]]
 
 class CSVDataset(Dataset):
-    def __init__(self, dataframe, directory):
+    def __init__(self, dataframe, directory, submission = False):
         self.directory = directory
         self.dataframe = dataframe
+        self.submission = submission
 
     def __getitem__(self, index):
         row = self.dataframe.iloc[index]
         url = row['url']
         idx = row['id']
-        category = torch.LongTensor([row['landmark_id']])[0]
+        if self.submission:
+            category = torch.LongTensor([-1])[0]
+        else:
+            category = torch.LongTensor([row['landmark_id']])[0]
 
         img = imread(self.directory + idx + '.jpg')
         #img = zoom(img, (224.0 / img.shape[0], 224.0 / img.shape[1], 1), order = 1)
