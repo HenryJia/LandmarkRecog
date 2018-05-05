@@ -138,7 +138,10 @@ class CombinedNetwork(nn.Module):
 
         out_final = self.final(out_merged)
 
-        return out_final, out_merged
+        results = [out_final, out_merged, out_feat]
+        if self.use_attention:
+            results += [out_attn]
+        return results
 
     def get_optims(self):
         main_params = list(self.main.parameters()) + list(self.feature.parameters()) + list(self.final.parameters())
