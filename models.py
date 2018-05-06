@@ -119,7 +119,7 @@ class CombinedNetwork(nn.Module):
         self.feature = FeatureNetwork()
         self.final = FinalNetwork(classes)
 
-        self.use_attention = False
+        self.use_attention = True
 
     def forward(self, x):
         out_main = self.main(x)

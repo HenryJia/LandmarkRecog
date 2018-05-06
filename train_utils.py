@@ -16,24 +16,31 @@ from queue import Queue
 from threading import Thread
 from tqdm import tqdm
 
+def gap(out, targets): # The Global Average Precision metric used for the competition
+    prob, category = torch.max(out, dim = 1)
+    _, indices = torch.sort(prob, descending = True)
+    correct = (category == targets).float()[indices]
+    precision = torch.cumsum(correct, dim = 0) / (torch.arange(correct.shape[0]).cuda() + 1).float()
+    return torch.mean(precision * correct)
 
 def test_iter(data, targets, net, criterion):
     out = net(data.float() / 255.0)[0]
 
     loss = criterion(out, targets)
     accuracy = torch.mean((torch.max(out, dim = 1)[1] == targets).float())
+    metric = gap(out, targets)
 
-    return out, loss, accuracy
+    return out, loss, accuracy, metric
 
 
 def train_iter(data, targets, net, criterion, optim):
-    out, loss, accuracy = test_iter(data, targets, net, criterion)
+    out, loss, accuracy, metric = test_iter(data, targets, net, criterion)
 
     net.zero_grad()
     loss.backward()
     optim.step()
 
-    return out, loss, accuracy
+    return out, loss, accuracy, metric
 
 
 def load_loop(q, loader, submission = False):

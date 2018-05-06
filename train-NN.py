@@ -27,7 +27,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_clean.csv') # This has just under 100k images
-mask = np.random.rand(len(train_data)) < 0.05
+mask = np.random.rand(len(train_data)) < 0.2
 
 test_data = train_data[mask]
 train_data = train_data[~mask]
@@ -40,8 +40,9 @@ train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_worker
 test_loader = DataLoader(test_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
 
 # Build our base model with pretrained weights
-net = CombinedNetwork(int(max(np.max(test_data['landmark_id']), np.max(train_data['landmark_id']))) + 1).cuda()
-net.load_state_dict(torch.load("network.nn"))
+classes = int(max(np.max(test_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
+net = CombinedNetwork(classes).cuda()
+net.load_state_dict(torch.load("network-1.nn"))
 torch.save(net.state_dict(), 'network.nn')
 
 criterion = nn.NLLLoss().cuda()
@@ -62,17 +63,19 @@ for epoch in range(5):
 
     loss_avg = 0 # Keep an exponential running avg
     accuracy_avg = 0
+    metric_avg = 0
 
     net.train(mode = True)
     while train_worker.is_alive() or not train_queue.empty():
 
         data, targets = train_queue.get()
-        out, loss, accuracy = train_iter(data, targets, net, criterion, main_optim)
+        out, loss, accuracy, metric = train_iter(data, targets, net, criterion, main_optim)
 
         loss_avg = 0.9 * loss_avg + 0.1 * loss.data.cpu().numpy()
         accuracy_avg = 0.9 * accuracy_avg + 0.1 * accuracy.data.cpu().numpy()
+        metric_avg = 0.9 * metric_avg + 0.1 * metric.data.cpu().numpy()
         pb.update(data.size()[0])
-        pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, queue_empty = train_queue.empty())
+        pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, gap = metric_avg, queue_empty = train_queue.empty())
 
     train_queue.join()
     pb.close()
@@ -85,17 +88,19 @@ for epoch in range(5):
 
     loss_avg = 0 # Keep an exponential running avg
     accuracy_avg = 0
+    metric_avg = 0
 
     net.train(mode = False)
     while test_worker.is_alive() or not test_queue.empty():
 
         data, targets = test_queue.get()
-        out, loss, accuracy = test_iter(data, targets, net, criterion)
+        out, loss, accuracy, metric = test_iter(data, targets, net, criterion)
 
         loss_avg = 0.9 * loss_avg + 0.1 * loss.data.cpu().numpy()
         accuracy_avg = 0.9 * accuracy_avg + 0.1 * accuracy.data.cpu().numpy()
+        metric_avg = 0.9 * metric_avg + 0.1 * metric.data.cpu().numpy()
         pb.update(data.size()[0])
-        pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, queue_empty = test_queue.empty())
+        pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, gap = metric_avg, queue_empty = test_queue.empty())
 
     pb.close()
     test_queue.join()
