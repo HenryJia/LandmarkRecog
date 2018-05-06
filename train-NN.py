@@ -41,6 +41,7 @@ test_loader = DataLoader(test_set, batch_size = 16, shuffle = True, num_workers 
 
 # Build our base model with pretrained weights
 net = CombinedNetwork(int(max(np.max(test_data['landmark_id']), np.max(train_data['landmark_id']))) + 1).cuda()
+net.load_state_dict(torch.load("network.nn"))
 torch.save(net.state_dict(), 'network.nn')
 
 criterion = nn.NLLLoss().cuda()

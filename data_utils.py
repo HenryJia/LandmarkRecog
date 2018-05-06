@@ -71,6 +71,8 @@ class CSVDataset(Dataset):
         img = cv2.resize(img, (224, 224), interpolation = cv2.INTER_LINEAR)
         img = torch.from_numpy(np.transpose(img, (2, 0, 1)))
 
+        if self.submission:
+            return img, idx
         return img, category
 
     def __len__(self):

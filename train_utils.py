@@ -36,17 +36,20 @@ def train_iter(data, targets, net, criterion, optim):
     return out, loss, accuracy
 
 
-def load_loop(q, loader):
+def load_loop(q, loader, submission = False):
     for i, (data_cpu, targets_cpu) in enumerate(loader):
         data = data_cpu.cuda(non_blocking = True)
-        targets = targets_cpu.cuda(non_blocking = True)
+        if submission:
+            targets = targets_cpu # They're in fact the ids
+        else:
+            targets = targets_cpu.cuda(non_blocking = True)
         q.put((data, targets))
         q.task_done()
 
 
-def make_queue(loader, maxsize = 10):
+def make_queue(loader, maxsize = 10, submission = False):
     data_queue = Queue(maxsize = maxsize)
-    worker = Thread(target = load_loop, args=(data_queue, loader))
+    worker = Thread(target = load_loop, args=(data_queue, loader, submission))
     worker.setDaemon(True)
     worker.start()
 
