@@ -44,7 +44,6 @@ val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 
 # Build our base model with pretrained weights
 classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
 net = CombinedNetwork(classes).cuda()
-torch.save(net.state_dict(), 'network.nn')
 
 criterion = nn.NLLLoss().cuda()
 #main_optim, attention_optim = net.get_optims()
@@ -54,7 +53,6 @@ main_optim = Adam(net.parameters(), lr = 3e-4)
 print('Training')
 net.use_attention = True
 for epoch in range(2):
-    net.load_state_dict(torch.load("network.nn"))
 
     print('Epoch ', epoch + 1, ', beginning train')
     pb = tqdm(total = len(train_set))
@@ -66,7 +64,7 @@ for epoch in range(2):
     accuracy_avg = 0
     metric_avg = 0
 
-    net.train(mode = True)
+    net.train()
     while train_worker.is_alive() or not train_queue.empty():
 
         data, targets = train_queue.get()
@@ -91,7 +89,7 @@ for epoch in range(2):
     accuracy_avg = 0
     metric_avg = 0
 
-    net.train(mode = False)
+    net.eval()
     while val_worker.is_alive() or not val_queue.empty():
 
         data, targets = val_queue.get()

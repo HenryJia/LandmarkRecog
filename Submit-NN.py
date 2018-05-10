@@ -53,7 +53,7 @@ test_queue, test_worker = make_queue(test_loader, submission = True)
 print('Run predict job')
 pb = tqdm(total = len(test_set))
 i = 0
-net.train(mode = False)
+net.eval()
 while test_worker.is_alive() or not test_queue.empty():
     data, idx = test_queue.get()
     out = net(data.float() / 255.0)[0]
@@ -81,7 +81,7 @@ count = 0
 for row_id in tqdm(test_df['id'], total = len(test_df)):
     if row_id not in idxs:
         count += 1
-        out_df = out_df.append({'id' : row_id, 'landmarks' : ' '}, ignore_index = True)
+        out_df = out_df.append({'id' : row_id, 'landmarks' : ''}, ignore_index = True)
 
 
 print(out_df)
