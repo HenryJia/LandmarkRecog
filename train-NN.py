@@ -31,6 +31,11 @@ import matplotlib.pyplot as plt
 train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_split.csv')
 val_data = pd.read_csv('/home/data/LandmarkRetrieval/val_split.csv')
 
+class_counts  = train_data.groupby(["landmark_id"]).agg("count")
+class_counts  = class_counts["id"]
+class_weights = len(train_data) / class_counts
+weights_tensor = Tensor(class_weights.values.reshape(-1))
+
 print('Training samples: ', len(train_data), '\n', train_data.head())
 print('Validation samples: ', len(val_data), '\n', val_data.head())
 
@@ -45,7 +50,7 @@ val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 
 classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
 net = CombinedNetwork(classes).cuda()
 
-criterion = nn.NLLLoss().cuda()
+criterion = nn.NLLLoss(weights=weights_tensor).cuda()
 #main_optim, attention_optim = net.get_optims()
 main_optim = Adam(net.parameters(), lr = 3e-4)
 
