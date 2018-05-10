@@ -1,4 +1,5 @@
 import os
+from math import gcd
 
 import numpy as np # linear algebra 
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
@@ -9,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import Adam
 import torch.utils.model_zoo as model_zoo
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision.models import ResNet, resnet50
 
 from queue import Queue
@@ -30,14 +31,20 @@ import matplotlib.pyplot as plt
 #train_data, val_data = split_validation(all_data, 0.8)
 train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_split.csv')
 val_data = pd.read_csv('/home/data/LandmarkRetrieval/val_split.csv')
-
-class_counts  = train_data.groupby(["landmark_id"]).agg("count")
-class_counts  = class_counts["id"]
-class_weights = len(train_data) / class_counts
-weights_tensor = Tensor(class_weights.values.reshape(-1))
+classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
 
 print('Training samples: ', len(train_data), '\n', train_data.head())
 print('Validation samples: ', len(val_data), '\n', val_data.head())
+
+print('Setting up samplers')
+#cls, class_weights  = np.unique(train_data['landmark_id'], return_counts = True)
+#class_weights = np.max(class_weights) / class_weights
+#class_weights = dict(zip(cls.tolist(), class_weights.tolist()))
+
+#sample_weights = []
+#for i, row in tqdm(train_data.iterrows(), total = len(train_data)):
+    #sample_weights += [class_weights[row['landmark_id']]]
+#sampler = WeightedRandomSampler(weights = sample_weights, num_samples = len(train_data), replacement = True)
 
 train_set = CSVDataset(train_data, '/home/data/LandmarkRetrieval/train/')
 val_set = CSVDataset(val_data, '/home/data/LandmarkRetrieval/train/')
@@ -47,10 +54,9 @@ train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_worker
 val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
 
 # Build our base model with pretrained weights
-classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
 net = CombinedNetwork(classes).cuda()
 
-criterion = nn.NLLLoss(weights=weights_tensor).cuda()
+criterion = nn.NLLLoss().cuda()
 #main_optim, attention_optim = net.get_optims()
 main_optim = Adam(net.parameters(), lr = 3e-4)
 
