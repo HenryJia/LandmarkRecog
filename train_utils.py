@@ -2,6 +2,7 @@ import os
 
 import numpy as np # linear algebra 
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+from sklearn.model_selection import train_test_split
 
 import torch
 from torch import Tensor
@@ -61,3 +62,18 @@ def make_queue(loader, maxsize = 10, submission = False):
     worker.start()
 
     return data_queue, worker
+
+
+def split_validation(all_df, ratio_train):
+    labels = np.unique(all_df['landmark_id'])
+
+    print("Splitting into validation and test set, keeping consistent label ratios")
+    train_indices = []
+    val_indices = []
+    for l in tqdm(labels.tolist()):
+        l_indices = list(all_df[all_df['landmark_id'] == l].index)
+        tl_indices, vl_indices = train_test_split(l_indices, test_size = 1 - ratio_train)
+        train_indices += tl_indices
+        val_indices += vl_indices
+
+    return all_df.loc[train_indices], all_df.loc[val_indices]

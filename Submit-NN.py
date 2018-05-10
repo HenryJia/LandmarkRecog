@@ -1,4 +1,4 @@
-import os
+import os, sys
 import math
 
 import numpy as np # linear algebra 
@@ -27,27 +27,34 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_clean.csv') # This has just under 100k images
-test_data = pd.read_csv('/home/data/LandmarkRetrieval/test_clean.csv')
+if len(sys.argv) != 6:
+    print('Syntax: {} <test.csv> <test_full.csv> <submission_out.csv> <network.nn> <data_dir>'.format(sys.argv[0]))
+    sys.exit(0)
+
+(test_csv, test_full_csv, submission_out, network_fn, directory) = sys.argv[1:]
+
+train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_clean.csv')
+test_data = pd.read_csv(test_csv)
 result_recog_df = pd.DataFrame(index = np.arange(len(test_data)), columns = ['id', 'landmarks'])
 
-test_set = CSVDataset(test_data, '/home/data/LandmarkRetrieval/test/', submission = True)
+test_set = CSVDataset(test_data, directory, submission = True)
 
 test_loader = DataLoader(test_set, batch_size = 16, shuffle = False, num_workers = 6, pin_memory = True)
 
 classes = int(np.max(train_data['landmark_id'])) + 1
+#classes = 14951
 net = CombinedNetwork(classes).cuda()
 net.use_attention = True
 net.train(mode = False)
-net.load_state_dict(torch.load("network-1.nn"))
+net.load_state_dict(torch.load(network_fn))
 
 test_queue, test_worker = make_queue(test_loader, submission = True)
 
 print('Run predict job')
 pb = tqdm(total = len(test_set))
 i = 0
+net.train(mode = False)
 while test_worker.is_alive() or not test_queue.empty():
-
     data, idx = test_queue.get()
     out = net(data.float() / 255.0)[0]
     for j in range(out.shape[0]):
@@ -55,7 +62,7 @@ while test_worker.is_alive() or not test_queue.empty():
         category = int(category.data.cpu().numpy())
         prob = math.exp(prob.data.cpu().numpy())
 
-        result_recog_df.iloc[i] = {'id' : idx[j], 'landmarks' : str(category) + ' ' + str("{0:.2f}".format(prob))}
+        result_recog_df.iloc[i] = {'id' : idx[j], 'landmarks' : str(category) + ' ' + str(prob)}
         i += 1
 
     pb.update(data.size()[0])
@@ -63,19 +70,19 @@ while test_worker.is_alive() or not test_queue.empty():
 pb.close()
 test_queue.join()
 
-print(correct / len(test_data))
-
 # Append all the rows we have no images on
 print('Add empty submission IDs')
 
-test_df = pd.read_csv('/home/data/LandmarkRetrieval/test.csv')
+test_df = pd.read_csv(test_full_csv)
 
 out_df = result_recog_df
 idxs = list(result_recog_df['id'])
-for i, row in tqdm(test_df.iterrows(), total = len(test_df)):
-    if row['id'] not in idxs:
-        out_df = out_df.append({'id' : row['id'], 'landmarks' : ' '}, ignore_index = True)
+count = 0
+for row_id in tqdm(test_df['id'], total = len(test_df)):
+    if row_id not in idxs:
+        count += 1
+        out_df = out_df.append({'id' : row_id, 'landmarks' : ' '}, ignore_index = True)
 
 
 print(out_df)
-out_df.to_csv('submission_recog.csv', index = False)
+out_df.to_csv(submission_out, index = False)

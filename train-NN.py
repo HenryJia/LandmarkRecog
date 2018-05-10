@@ -20,29 +20,30 @@ tqdm.monitor_interval = 0
 
 from data_utils import grab, sample, read_img, CSVDataset
 from models import MainNetwork, FeatureNetwork, FeatureNetwork, FinalNetwork, CombinedNetwork
-from train_utils import train_iter, test_iter, make_queue
+from train_utils import train_iter, test_iter, make_queue, split_validation
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_clean.csv') # This has just under 100k images
-mask = np.random.rand(len(train_data)) < 0.2
+#all_data = pd.read_csv('/home/data/LandmarkRetrieval/train_clean.csv') # This has just under 100k images
+#train_data, val_data = split_validation(all_data, 0.8)
+train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_split.csv')
+val_data = pd.read_csv('/home/data/LandmarkRetrieval/val_split.csv')
 
-test_data = train_data[mask]
-train_data = train_data[~mask]
+print('Training samples: ', len(train_data), '\n', train_data.head())
+print('Validation samples: ', len(val_data), '\n', val_data.head())
 
 train_set = CSVDataset(train_data, '/home/data/LandmarkRetrieval/train/')
-test_set = CSVDataset(test_data, '/home/data/LandmarkRetrieval/train/')
+val_set = CSVDataset(val_data, '/home/data/LandmarkRetrieval/train/')
 
 # 16 seems to be the maximum batchsize we can do parallel load and train with
 train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
-test_loader = DataLoader(test_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
+val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
 
 # Build our base model with pretrained weights
-classes = int(max(np.max(test_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
+classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
 net = CombinedNetwork(classes).cuda()
-net.load_state_dict(torch.load("network-1.nn"))
 torch.save(net.state_dict(), 'network.nn')
 
 criterion = nn.NLLLoss().cuda()
@@ -52,7 +53,7 @@ main_optim = Adam(net.parameters(), lr = 3e-4)
 
 print('Training')
 net.use_attention = True
-for epoch in range(5):
+for epoch in range(2):
     net.load_state_dict(torch.load("network.nn"))
 
     print('Epoch ', epoch + 1, ', beginning train')
@@ -81,29 +82,29 @@ for epoch in range(5):
     pb.close()
 
     print('Epoch ', epoch + 1, ', beginning test')
-    pb = tqdm(total = len(test_set))
+    pb = tqdm(total = len(val_set))
     pb.set_description('Epoch ' + str(epoch + 1))
 
-    test_queue, test_worker = make_queue(test_loader)
+    val_queue, val_worker = make_queue(val_loader)
 
     loss_avg = 0 # Keep an exponential running avg
     accuracy_avg = 0
     metric_avg = 0
 
     net.train(mode = False)
-    while test_worker.is_alive() or not test_queue.empty():
+    while val_worker.is_alive() or not val_queue.empty():
 
-        data, targets = test_queue.get()
+        data, targets = val_queue.get()
         out, loss, accuracy, metric = test_iter(data, targets, net, criterion)
 
         loss_avg = 0.9 * loss_avg + 0.1 * loss.data.cpu().numpy()
         accuracy_avg = 0.9 * accuracy_avg + 0.1 * accuracy.data.cpu().numpy()
         metric_avg = 0.9 * metric_avg + 0.1 * metric.data.cpu().numpy()
         pb.update(data.size()[0])
-        pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, gap = metric_avg, queue_empty = test_queue.empty())
+        pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, gap = metric_avg, queue_empty = val_queue.empty())
 
     pb.close()
-    test_queue.join()
+    val_queue.join()
     print('Test loss and accuracy ', (loss_avg, accuracy_avg))
 
-    torch.save(net.state_dict(), 'network.nn')
+    torch.save(net.state_dict(), 'network-epoch' + str(epoch) + '.nn')
