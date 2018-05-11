@@ -63,7 +63,7 @@ main_optim = Adam(net.parameters(), lr = 3e-4)
 
 print('Training')
 net.use_attention = True
-for epoch in range(2):
+for epoch in range(3):
 
     print('Epoch ', epoch + 1, ', beginning train')
     pb = tqdm(total = len(train_set))
