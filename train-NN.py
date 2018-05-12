@@ -50,8 +50,8 @@ train_set = CSVDataset(train_data, '/home/data/LandmarkRetrieval/train/')
 val_set = CSVDataset(val_data, '/home/data/LandmarkRetrieval/train/')
 
 # 16 seems to be the maximum batchsize we can do parallel load and train with
-train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
-val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
+train_loader = DataLoader(train_set, batch_size = 4, shuffle = True, num_workers = 6, pin_memory = True)
+val_loader = DataLoader(val_set, batch_size = 4, shuffle = True, num_workers = 6, pin_memory = True)
 
 # Build our base model with pretrained weights
 net = CombinedNetwork(classes).cuda()

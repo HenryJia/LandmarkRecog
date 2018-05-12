@@ -1,12 +1,23 @@
+from collections import OrderedDict
+
+import numpy as np
+
+from train_utils import train_iter, test_iter, make_queue, split_validation, gap
+
 import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import Adam
 import torch.utils.model_zoo as model_zoo
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from torchvision.models import ResNet, resnet50
 
+from sklearn.linear_model import LogisticRegression
+
+import tqdm
+from tqdm import tqdm
+tqdm.monitor_interval = 0
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -146,3 +157,144 @@ class CombinedNetwork(nn.Module):
     def get_optims(self):
         main_params = list(self.main.parameters()) + list(self.feature.parameters()) + list(self.final.parameters())
         return Adam(main_params, lr = 3e-4), Adam(self.attention.parameters())
+
+
+# Boost a model with a nearest neighbour/class on the feature vectors
+class BoostedNearestClass(object): # Note this is NOT a PyTorch model so the normal pytorch serialisation will NOT work
+    def __init__(self, net, classes):
+        self.net = net
+        self.classes = classes
+        self.class_statistics = {}
+        self.booster = nn.Linear(2, 1).cuda() # Just use default parameters for now
+
+
+    def train(self, train_set, max_class = 100, max_samples_boost = 100):
+        print("Computing features for each class in the trainset")
+        pb = tqdm(total = len(train_set))
+        train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
+        train_queue, train_worker = make_queue(train_loader)
+
+        class_feat = {}
+        self.net.eval()
+        while train_worker.is_alive() or not train_queue.empty():
+
+            data, targets = train_queue.get()
+
+            data_selected = []
+            targets_selected = []
+            for i in range(targets.shape[0]):
+                if i not in class_feat or class_feat[i].shape[0] < max_class:
+                    data_selected += [data[i]]
+                    targets_selected += [targets[i]]
+
+            data = torch.stack(data_selected, dim = 0)
+            targets = torch.stack(targets_selected, dim = 0)
+
+            out_final, out_merged, out_feat, out_attn = self.net(data.float() / 255.0)
+            for i in range(out_final.shape[0]):
+                prob, category = torch.max(out_final[i], dim = 0)
+                category = int(category.data.cpu().numpy())
+
+                if category in class_feat:
+                    class_feat[category] = torch.cat([class_feat[category], out_merged[None, i]], dim = 0).data
+                else:
+                    class_feat[category] = out_merged[None, i].data
+            pb.update(data.size()[0])
+
+        train_queue.join()
+        pb.close()
+
+        print("Computing centroids")
+        for k in tqdm(class_feat):
+            if len(class_feat[k]) == 1: # We can't really compute a standard deviation so set it to 1
+                self.class_statistics[k] = (class_feat[k][0], torch.ones(class_feat[k][0].shape).cuda())
+            else:
+                self.class_statistics[k] = (torch.mean(class_feat[k], dim = 0), torch.std(class_feat[k], dim = 0))
+
+        idx = list(self.class_statistics.keys())
+        stat = self.class_statistics.values()
+        mu, sigma = zip(*stat)
+
+        idx = torch.LongTensor(idx).cuda()
+        mu = torch.stack(mu, dim = 0)
+        sigma = torch.stack(sigma, dim = 0)
+        self.class_statistics = [idx, [mu, sigma]]
+
+        print("Fitting the booster")
+        criterion = nn.NLLLoss()
+        booster_optim = Adam(self.booster.parameters(), lr = 3e-4)
+
+        loss_avg = 0 # Keep an exponential running avg
+        accuracy_avg = 0
+        metric_avg = 0
+
+        # We don't need very much data since we have literally 2 datapoints
+        sampler = SubsetRandomSampler(np.random.permutation(len(train_set))[:max_samples_boost].tolist())
+        train_loader = DataLoader(train_set, batch_size = 16, sampler = sampler, num_workers = 6, pin_memory = True)
+        train_queue, train_worker = make_queue(train_loader)
+
+
+        pb = tqdm(total = max_samples_boost)
+        while train_worker.is_alive() or not train_queue.empty():
+            data, targets = train_queue.get()
+
+            out_booster, out_net = self.run_all(data)
+
+            loss = criterion(out_booster, targets)
+            accuracy = torch.mean((torch.max(out_booster, dim = 1)[1] == targets).float())
+            metric = gap(out_booster, targets)
+
+            self.booster.zero_grad()
+            loss.backward()
+            booster_optim.step()
+
+            loss_avg = 0.9 * loss_avg + 0.1 * loss.data.cpu().numpy()
+            accuracy_avg = 0.9 * accuracy_avg + 0.1 * accuracy.data.cpu().numpy()
+            metric_avg = 0.9 * metric_avg + 0.1 * metric.data.cpu().numpy()
+            pb.update(data.size()[0])
+            pb.set_postfix(loss = loss_avg, accuracy = accuracy_avg, gap = metric_avg)
+
+        pb.close()
+        train_queue.join()
+
+
+    def run_neighbours(self, data):
+        out_net, out_merged, out_feat, out_attn = self.net(data.float() / 255.0)
+
+        idx, (mu, sigma) = self.class_statistics
+        distance = torch.sqrt(torch.sum((out_merged.unsqueeze(1) - mu) ** 2 / sigma ** 2, dim = 2))
+        _, min_distance = torch.min(distance, dim = 1)
+
+        out_nearest = torch.zeros_like(out_net)
+        for i in range(min_distance.shape[0]):
+            out_nearest[i, idx[min_distance[i]]] = 1
+
+        return out_nearest, out_net
+
+
+    def run_all(self, data):
+        out_nearest, out_net = self.run_neighbours(data)
+        out_nearest_onehot = torch.zeros_like(out_net)[:, :, None]
+        out_net = torch.exp(out_net)[:, :, None] # Get the actual probabilities
+
+        in_booster = torch.cat([out_nearest_onehot, out_net], dim = 2)
+        out_booster = F.log_softmax(torch.squeeze(self.booster(in_booster)), dim = 1)
+
+        return out_booster, out_net
+
+
+    def save(self):
+        torch.save(self.class_statistics[0], 'idx.pytorch')
+        torch.save(self.class_statistics[1][0], 'mu.pytorch')
+        torch.save(self.class_statistics[1][1], 'sigma.pytorch')
+
+        torch.save(self.booster.state_dict(), 'booster.nn')
+
+
+    def load(self):
+        idx = torch.load('idx.pytorch')
+        mu = torch.load('mu.pytorch')
+        sigma = torch.load('sigma.pytorch')
+        self.class_statistics = [idx, [mu, sigma]]
+
+        self.booster.load_state_dict(torch.load('booster.nn'))
