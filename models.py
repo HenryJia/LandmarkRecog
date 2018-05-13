@@ -168,7 +168,7 @@ class BoostedNearestClass(object): # Note this is NOT a PyTorch model so the nor
         self.booster = nn.Linear(2, 1).cuda() # Just use default parameters for now
 
 
-    def train(self, train_set, max_class = 100, max_samples_boost = 100):
+    def train_means(self, train_set):
         print("Computing features for each class in the trainset")
         pb = tqdm(total = len(train_set))
         train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
@@ -179,27 +179,17 @@ class BoostedNearestClass(object): # Note this is NOT a PyTorch model so the nor
         while train_worker.is_alive() or not train_queue.empty():
 
             data, targets = train_queue.get()
-
-            data_selected = []
-            targets_selected = []
-            for i in range(targets.shape[0]):
-                if i not in class_feat or class_feat[i].shape[0] < max_class:
-                    data_selected += [data[i]]
-                    targets_selected += [targets[i]]
-
-            data = torch.stack(data_selected, dim = 0)
-            targets = torch.stack(targets_selected, dim = 0)
+            progress = data.shape[0]
 
             out_final, out_merged, out_feat, out_attn = self.net(data.float() / 255.0)
             for i in range(out_final.shape[0]):
-                prob, category = torch.max(out_final[i], dim = 0)
-                category = int(category.data.cpu().numpy())
-
+                category = targets[i]
                 if category in class_feat:
-                    class_feat[category] = torch.cat([class_feat[category], out_merged[None, i]], dim = 0).data
+                    class_feat[category] += [out_merged[i].data]
                 else:
-                    class_feat[category] = out_merged[None, i].data
-            pb.update(data.size()[0])
+                    class_feat[category] = [out_merged[i].data]
+
+            pb.update(progress)
 
         train_queue.join()
         pb.close()
@@ -207,18 +197,22 @@ class BoostedNearestClass(object): # Note this is NOT a PyTorch model so the nor
         print("Computing centroids")
         for k in tqdm(class_feat):
             if len(class_feat[k]) == 1: # We can't really compute a standard deviation so set it to 1
-                self.class_statistics[k] = (class_feat[k][0], torch.ones(class_feat[k][0].shape).cuda())
+                self.class_statistics[k] = (class_feat[k][0], torch.ones(*class_feat[k][0].shape).cuda())
             else:
+                class_feat[k] = torch.stack(class_feat[k], dim = 0)
                 self.class_statistics[k] = (torch.mean(class_feat[k], dim = 0), torch.std(class_feat[k], dim = 0))
 
         idx = list(self.class_statistics.keys())
         stat = self.class_statistics.values()
         mu, sigma = zip(*stat)
 
-        idx = torch.LongTensor(idx).cuda()
-        mu = torch.stack(mu, dim = 0)
-        sigma = torch.stack(sigma, dim = 0)
+        idx = torch.LongTensor(idx).cuda().data
+        mu = torch.stack(mu, dim = 0).data
+        sigma = torch.stack(sigma, dim = 0).data
         self.class_statistics = [idx, [mu, sigma]]
+
+
+    def train_booster(self, train_set, max_samples = 1000): # set max_samples to -1 to use all
 
         print("Fitting the booster")
         criterion = nn.NLLLoss()
@@ -229,16 +223,19 @@ class BoostedNearestClass(object): # Note this is NOT a PyTorch model so the nor
         metric_avg = 0
 
         # We don't need very much data since we have literally 2 datapoints
-        sampler = SubsetRandomSampler(np.random.permutation(len(train_set))[:max_samples_boost].tolist())
-        train_loader = DataLoader(train_set, batch_size = 16, sampler = sampler, num_workers = 6, pin_memory = True)
+        if max_samples != -1:
+            sampler = SubsetRandomSampler(np.random.permutation(len(train_set))[:max_samples].tolist())
+            train_loader = DataLoader(train_set, batch_size = 4, sampler = sampler, num_workers = 6, pin_memory = True)
+        else:
+            train_loader = DataLoader(train_set, batch_size = 4, shuffle = True, num_workers = 6, pin_memory = True)
         train_queue, train_worker = make_queue(train_loader)
 
 
-        pb = tqdm(total = max_samples_boost)
+        pb = tqdm(total = max_samples)
         while train_worker.is_alive() or not train_queue.empty():
             data, targets = train_queue.get()
 
-            out_booster, out_net = self.run_all(data)
+            out_booster, out_nearest, out_net = self.run_all(data)
 
             loss = criterion(out_booster, targets)
             accuracy = torch.mean((torch.max(out_booster, dim = 1)[1] == targets).float())
@@ -274,13 +271,11 @@ class BoostedNearestClass(object): # Note this is NOT a PyTorch model so the nor
 
     def run_all(self, data):
         out_nearest, out_net = self.run_neighbours(data)
-        out_nearest_onehot = torch.zeros_like(out_net)[:, :, None]
-        out_net = torch.exp(out_net)[:, :, None] # Get the actual probabilities
 
-        in_booster = torch.cat([out_nearest_onehot, out_net], dim = 2)
+        in_booster = torch.cat([out_nearest[:, :, None], torch.exp(out_net)[:, :, None]], dim = 2)
         out_booster = F.log_softmax(torch.squeeze(self.booster(in_booster)), dim = 1)
 
-        return out_booster, out_net
+        return out_booster, out_nearest, out_net
 
 
     def save(self):
