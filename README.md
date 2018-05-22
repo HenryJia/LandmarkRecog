@@ -1,7 +1,7 @@
 # Kaggle Landmark Recognition Challenge in PyTorch
 
 ## Method
-We use an attention based model similar to DELF, bt we do not use PCA to reduce dimensionality. The model uses pretrained ResNet50 weights on ImageNet
+We use an attention based model similar to DELF, but we do not use PCA to reduce dimensionality. The model uses pretrained ResNet50 weights on ImageNet
 
 
 ## Files:
