@@ -12,6 +12,7 @@ from torch.optim import Adam
 import torch.utils.model_zoo as model_zoo
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision.models import ResNet, resnet50
+from torchvision.transforms import Compose
 
 from queue import Queue
 from threading import Thread
@@ -19,7 +20,7 @@ import tqdm
 from tqdm import tqdm
 tqdm.monitor_interval = 0
 
-from data_utils import grab, sample, read_img, CSVDataset
+from data_utils import grab, sample, read_img, RandomFlip, RandomRotation, CSVDataset
 from models import MainNetwork, FeatureNetwork, FeatureNetwork, FinalNetwork, CombinedNetwork
 from train_utils import train_iter, test_iter, make_queue, split_validation
 
@@ -37,20 +38,22 @@ print('Training samples: ', len(train_data), '\n', train_data.head())
 print('Validation samples: ', len(val_data), '\n', val_data.head())
 
 print('Setting up samplers')
-#cls, class_weights  = np.unique(train_data['landmark_id'], return_counts = True)
-#class_weights = np.max(class_weights) / class_weights
-#class_weights = dict(zip(cls.tolist(), class_weights.tolist()))
+cls, class_weights  = np.unique(train_data['landmark_id'], return_counts = True)
+class_weights = np.max(class_weights) / class_weights
+class_weights = dict(zip(cls.tolist(), class_weights.tolist()))
 
-#sample_weights = []
-#for i, row in tqdm(train_data.iterrows(), total = len(train_data)):
-    #sample_weights += [class_weights[row['landmark_id']]]
-#sampler = WeightedRandomSampler(weights = sample_weights, num_samples = len(train_data), replacement = True)
+sample_weights = []
+for i, row in tqdm(train_data.iterrows(), total = len(train_data)):
+    sample_weights += [class_weights[row['landmark_id']]]
+sampler = WeightedRandomSampler(weights = sample_weights, num_samples = len(train_data), replacement = True)
 
-train_set = CSVDataset(train_data, '/home/data/LandmarkRetrieval/train/')
+transforms = Compose([RandomFlip(axis = 0), RandomFlip(axis = 1), RandomRotation(degrees = (-20, 20))])
+
+train_set = CSVDataset(train_data, '/home/data/LandmarkRetrieval/train/', transforms = transforms)
 val_set = CSVDataset(val_data, '/home/data/LandmarkRetrieval/train/')
 
 # 16 seems to be the maximum batchsize we can do parallel load and train with
-train_loader = DataLoader(train_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
+train_loader = DataLoader(train_set, batch_size = 16, sampler = sampler, num_workers = 6, pin_memory = True)
 val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 6, pin_memory = True)
 
 # Build our base model with pretrained weights
@@ -64,7 +67,7 @@ main_optim = Adam(net.parameters(), lr = 3e-4)
 
 print('Training')
 net.use_attention = True
-for epoch in range(3, 10):
+for epoch in range(1, 3):
 
     print('Epoch ', epoch + 1, ', beginning train')
     pb = tqdm(total = len(train_set))
@@ -117,4 +120,4 @@ for epoch in range(3, 10):
     val_queue.join()
     print('Test loss and accuracy ', (loss_avg, accuracy_avg))
 
-    torch.save(net.state_dict(), 'network-epoch' + str(epoch) + '.nn')
+    torch.save(net.state_dict(), 'network-balanced-epoch' + str(epoch) + '.nn')

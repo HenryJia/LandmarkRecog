@@ -1,10 +1,12 @@
 from urllib import request, error
 from time import time
+import random
+
 import numpy as np
 from PIL import Image
 from io import BytesIO
 from scipy.misc import imread
-from scipy.ndimage import zoom
+from scipy.ndimage.interpolation import zoom, rotate
 import cv2
 
 import torch
@@ -51,11 +53,57 @@ def random_crop(img, size):
 
     return img[idx:idx + size[0], idy:idy + size[1]]
 
-class CSVDataset(Dataset):
-    def __init__(self, dataframe, directory, submission = False):
+
+class RandomFlip(object):
+    """Horizontally flip the given NumPy array randomly with a given probability.
+    Args:
+        axis (positive integer): axis to flip along
+        p (float): probability of the image being flipped. Default value is 0.5
+    """
+
+    def __init__(self, axis = 0, p = 0.5):
+        self.axis = axis
+        self.p = p
+
+    def __call__(self, x):
+        """
+        Args:
+            x (NumPy array): array to be flipped.
+        Returns:
+            NumPy array: Randomly flipped NumPy array.
+        """
+        if random.random() < self.p:
+            return np.flip(x, axis = self.axis).copy()
+        return x
+
+
+class RandomRotation(object):
+    """Rotate the image by angle.
+    Args:
+        degrees (min, max): Range of degrees to select from.
+    """
+
+    def __init__(self, degrees):
+        self.degrees = degrees
+
+    def __call__(self, img):
+        """
+            img (PIL Image): Image to be rotated.
+        Returns:
+            PIL Image: Rotated image.
+        """
+
+        angle = random.uniform(self.degrees[0], self.degrees[1])
+
+        return rotate(img, angle, order = 1, reshape = False)
+
+
+class CSVDataset(Dataset): # Note: All torchvision transforms are just classes with a __call__ attribute anyway, so they can be used here
+    def __init__(self, dataframe, directory, transforms = None, submission = False):
         self.directory = directory
         self.dataframe = dataframe
         self.submission = submission
+        self.transforms = transforms
 
     def __getitem__(self, index):
         row = self.dataframe.iloc[index]
@@ -68,7 +116,11 @@ class CSVDataset(Dataset):
 
         img = imread(self.directory + idx + '.jpg')
         #img = zoom(img, (224.0 / img.shape[0], 224.0 / img.shape[1], 1), order = 1)
+        #img = Image.open(self.directory + idx + '.jpg')
+
         img = cv2.resize(img, (224, 224), interpolation = cv2.INTER_LINEAR)
+        if self.transforms is not None:
+            img = self.transforms(img)
         img = torch.from_numpy(np.transpose(img, (2, 0, 1)))
 
         if self.submission:
