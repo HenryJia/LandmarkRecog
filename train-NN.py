@@ -27,8 +27,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-#all_data = pd.read_csv('/home/data/LandmarkRetrieval/train_clean.csv') # This has just under 100k images
-#train_data, val_data = split_validation(all_data, 0.8)
 train_data = pd.read_csv('/home/data/LandmarkRetrieval/train_split.csv')
 val_data = pd.read_csv('/home/data/LandmarkRetrieval/val_split.csv')
 classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_id']))) + 1
@@ -36,16 +34,7 @@ classes = int(max(np.max(val_data['landmark_id']), np.max(train_data['landmark_i
 print('Training samples: ', len(train_data), '\n', train_data.head())
 print('Validation samples: ', len(val_data), '\n', val_data.head())
 
-print('Setting up samplers')
-#cls, class_weights  = np.unique(train_data['landmark_id'], return_counts = True)
-#class_weights = np.max(class_weights) / class_weights
-#class_weights = dict(zip(cls.tolist(), class_weights.tolist()))
-
-#sample_weights = []
-#for i, row in tqdm(train_data.iterrows(), total = len(train_data)):
-    #sample_weights += [class_weights[row['landmark_id']]]
-#sampler = WeightedRandomSampler(weights = sample_weights, num_samples = len(train_data), replacement = True)
-
+print('Setting up Dataloaders')
 train_set = CSVDataset(train_data, '/home/data/LandmarkRetrieval/train/')
 val_set = CSVDataset(val_data, '/home/data/LandmarkRetrieval/train/')
 
@@ -55,7 +44,6 @@ val_loader = DataLoader(val_set, batch_size = 16, shuffle = True, num_workers = 
 
 # Build our base model with pretrained weights
 net = CombinedNetwork(classes).cuda()
-net.load_state_dict(torch.load('./archived_nn/network-epoch2.nn'))
 
 criterion = nn.NLLLoss().cuda()
 #main_optim, attention_optim = net.get_optims()
